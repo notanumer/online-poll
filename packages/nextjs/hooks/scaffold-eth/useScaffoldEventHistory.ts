@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
+import { useTargetNetwork } from "./useTargetNetwork";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Abi, AbiEvent, ExtractAbiEventNames } from "abitype";
 import { BlockNumber, GetLogsParameters } from "viem";
 import { Config, UsePublicClientReturnType, useBlockNumber, usePublicClient } from "wagmi";
-import { useSelectedNetwork } from "~~/hooks/scaffold-eth";
 import { useDeployedContractInfo } from "~~/hooks/scaffold-eth";
-import { AllowedChainIds } from "~~/utils/scaffold-eth";
 import { replacer } from "~~/utils/scaffold-eth/common";
 import {
   ContractAbi,
@@ -58,7 +57,6 @@ const getEvents = async (
  * @param config.contractName - deployed contract name
  * @param config.eventName - name of the event to listen for
  * @param config.fromBlock - the block number to start reading events from
- * @param config.chainId - optional chainId that is configured with the scaffold project to make use for multi-chain interactions.
  * @param config.filters - filters to be applied to the event (parameterName: value)
  * @param config.blockData - if set to true it will return the block data for each event (default: false)
  * @param config.transactionData - if set to true it will return the transaction data for each event (default: false)
@@ -76,7 +74,6 @@ export const useScaffoldEventHistory = <
   contractName,
   eventName,
   fromBlock,
-  chainId,
   filters,
   blockData,
   transactionData,
@@ -84,19 +81,15 @@ export const useScaffoldEventHistory = <
   watch,
   enabled = true,
 }: UseScaffoldEventHistoryConfig<TContractName, TEventName, TBlockData, TTransactionData, TReceiptData>) => {
-  const selectedNetwork = useSelectedNetwork(chainId);
-
+  const { targetNetwork } = useTargetNetwork();
   const publicClient = usePublicClient({
-    chainId: selectedNetwork.id,
+    chainId: targetNetwork.id,
   });
   const [isFirstRender, setIsFirstRender] = useState(true);
 
-  const { data: blockNumber } = useBlockNumber({ watch: watch, chainId: selectedNetwork.id });
+  const { data: blockNumber } = useBlockNumber({ watch: watch, chainId: targetNetwork.id });
 
-  const { data: deployedContractData } = useDeployedContractInfo({
-    contractName,
-    chainId: selectedNetwork.id as AllowedChainIds,
-  });
+  const { data: deployedContractData } = useDeployedContractInfo(contractName);
 
   const event =
     deployedContractData &&
@@ -112,7 +105,7 @@ export const useScaffoldEventHistory = <
         address: deployedContractData?.address,
         eventName,
         fromBlock: fromBlock.toString(),
-        chainId: selectedNetwork.id,
+        chainId: targetNetwork.id,
         filters: JSON.stringify(filters, replacer),
       },
     ],
@@ -128,18 +121,8 @@ export const useScaffoldEventHistory = <
     },
     enabled: enabled && isContractAddressAndClientReady,
     initialPageParam: fromBlock,
-    getNextPageParam: (lastPage, allPages, lastPageParam) => {
-      if (!blockNumber || fromBlock >= blockNumber) return undefined;
-
-      const lastPageHighestBlock = Math.max(
-        Number(fromBlock),
-        ...(lastPage || []).map(event => Number(event.blockNumber || 0)),
-      );
-      const nextBlock = BigInt(Math.max(Number(lastPageParam), lastPageHighestBlock) + 1);
-
-      if (nextBlock > blockNumber) return undefined;
-
-      return nextBlock;
+    getNextPageParam: () => {
+      return blockNumber;
     },
     select: data => {
       const events = data.pages.flat();
@@ -150,7 +133,6 @@ export const useScaffoldEventHistory = <
         TTransactionData,
         TReceiptData
       >;
-
       return {
         pages: eventHistoryData?.reverse(),
         pageParams: data.pageParams,
